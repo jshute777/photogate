@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Photogate Speed (BLE)</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 20px; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+    button { padding:10px 14px; font-size:14px; cursor:pointer; }
+    .pill { padding:6px 10px; border-radius:999px; background:#eee; display:inline-block; }
+    #latest { font-size: 64px; font-weight: 900; margin: 12px 0 0; line-height: 1; }
+    #units  { font-size: 18px; color: #444; margin-top: 6px; }
+    #raw    { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+              color:#666; margin: 12px 0 18px; }
+    table { border-collapse: collapse; width: 100%; max-width: 900px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align:left; }
+    th { background: #f7f7f7; }
+    .warn { color:#b00020; display:none; margin-top:10px; }
+  </style>
+</head>
+<body>
+  <h1>Photogate Speed (BLE)</h1>
+
+  <div class="row">
+    <button id="connect">Connect</button>
+    <button id="disconnect" disabled>Disconnect</button>
+    <button id="clear" disabled>Clear</button>
+    <button id="csv" disabled>Download CSV</button>
+    <span id="status" class="pill">Disconnected</span>
+  </div>
+
+  <div id="latest">—</div>
+  <div id="units">m/s</div>
+  <div id="raw">Waiting for BLE notifications…</div>
+
+  <div id="hint" class="warn">
+    If the Connect button does nothing, open this page from a local server (not file://).<br>
+    Easiest: run <b>python -m http.server 8000</b> and open <b>http://localhost:8000/photogate_ble.html</b>
+  </div>
+
+  <h2>Log</h2>
+  <table>
+    <thead><tr><th>#</th><th>Time</th><th>Speed (m/s)</th><th>Raw</th></tr></thead>
+    <tbody id="tbody"></tbody>
+  </table>
+
+<script>
+  // MUST match your ESP32 UUIDs:
+  const SERVICE_UUID = "12345678-1234-1234-1234-123456789abc";
+  const CHAR_UUID    = "abcdefab-1234-1234-1234-abcdefabcdef";
+
+  let device = null;
+  let characteristic = null;
+  let rows = [];
+  let n = 0;
+
+  const $ = (id) => document.getElementById(id);
+  const statusEl = $("status");
+  const latestEl = $("latest");
+  const rawEl = $("raw");
+  const tbody = $("tbody");
+  const hint = $("hint");
+
+  function setStatus(text, ok=true) {
+    statusEl.textContent = text;
+    statusEl.style.background = ok ? "#e8f5e9" : "#ffebee";
+  }
+
+  function nowString() {
+    return new Date().toLocaleTimeString();
+  }
+
+  function parseSpeed(text) {
+    // Accept: "Speed: 1.234 m/s" OR "1.234" OR "v=1.234"
+    const m = text.match(/([-+]?\d+(\.\d+)?)/);
+    if (!m) return null;
+    const v = Number(m[1]);
+    return Number.isFinite(v) ? v : null;
+  }
+
+  function escapeHtml(s) {
+    return s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  }
+
+  function addRow(speed, raw) {
+    n += 1;
+    const time = nowString();
+    rows.push({ n, time, speed, raw });
+
+    latestEl.textContent = speed.toFixed(2);
+    rawEl.textContent = `${time}  |  ${raw}`;
+
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${n}</td><td>${time}</td><td>${speed.toFixed(3)}</td><td class="mono">${escapeHtml(raw)}</td>`;
+    tbody.prepend(tr);
+  }
+
+  function clearLog() {
+    rows = [];
+    n = 0;
+    tbody.innerHTML = "";
+    latestEl.textContent = "—";
+    rawEl.textContent = "Waiting for BLE notifications…";
+  }
+
+  function downloadCSV() {
+    const header = "n,time,speed_mps,raw\n";
+    const body = rows.slice().reverse().map(r =>
+      `${r.n},${r.time},${r.speed},${JSON.stringify(r.raw)}`
+    ).join("\n");
+    const blob = new Blob([header + body + "\n"], {type:"text/csv"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "photogate_speeds.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function onDisconnected() {
+    setStatus("Disconnected", false);
+    $("disconnect").disabled = true;
+    $("clear").disabled = true;
+    $("csv").disabled = true;
+    device = null;
+    characteristic = null;
+  }
+
+  async function connect() {
+    hint.style.display = (location.protocol === "file:") ? "block" : "none";
+
+    if (!navigator.bluetooth) {
+      alert("Web Bluetooth not supported. Use Chrome.");
+      return;
+    }
+
+    setStatus("Connecting…");
+
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [SERVICE_UUID] }],
+      optionalServices: [SERVICE_UUID]
+    });
+
+    device.addEventListener("gattserverdisconnected", onDisconnected);
+
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService(SERVICE_UUID);
+    characteristic = await service.getCharacteristic(CHAR_UUID);
+
+    await characteristic.startNotifications();
+    characteristic.addEventListener("characteristicvaluechanged", (e) => {
+      const text = new TextDecoder().decode(e.target.value).trim();
+      const speed = parseSpeed(text);
+      if (speed !== null) addRow(speed, text);
+    });
+
+    setStatus(`Connected: ${device.name || "BLE device"}`);
+    $("disconnect").disabled = false;
+    $("clear").disabled = false;
+    $("csv").disabled = false;
+  }
+
+  function disconnect() {
+    if (device?.gatt?.connected) device.gatt.disconnect();
+    onDisconnected();
+  }
+
+  $("connect").addEventListener("click", () => connect().catch(err => {
+    console.error(err);
+    setStatus("Connect failed", false);
+    alert("Connect failed: " + err.message);
+  }));
+  $("disconnect").addEventListener("click", disconnect);
+  $("clear").addEventListener("click", clearLog);
+  $("csv").addEventListener("click", downloadCSV);
+</script>
+</body>
+</html>
