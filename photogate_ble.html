@@ -3,47 +3,382 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Photogate Speed (BLE)</title>
+  <title>Photogate Speed Monitor</title>
   <style>
-    body { font-family: system-ui, Arial, sans-serif; margin: 20px; }
-    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
-    button { padding:10px 14px; font-size:14px; cursor:pointer; }
-    .pill { padding:6px 10px; border-radius:999px; background:#eee; display:inline-block; }
-    #latest { font-size: 64px; font-weight: 900; margin: 12px 0 0; line-height: 1; }
-    #units  { font-size: 18px; color: #444; margin-top: 6px; }
-    #raw    { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-              color:#666; margin: 12px 0 18px; }
-    table { border-collapse: collapse; width: 100%; max-width: 900px; }
-    th, td { border: 1px solid #ddd; padding: 8px; text-align:left; }
-    th { background: #f7f7f7; }
-    .warn { color:#b00020; display:none; margin-top:10px; }
+    :root{
+      --bg:#0b1020;
+      --panel:#121a33;
+      --panel2:#0f1630;
+      --text:#e8ecff;
+      --muted:#aab2d6;
+      --line:rgba(255,255,255,.10);
+      --accent:#6ee7ff;
+      --good:#34d399;
+      --bad:#fb7185;
+      --warn:#fbbf24;
+      --shadow: 0 10px 30px rgba(0,0,0,.35);
+      --radius: 16px;
+    }
+
+    *{ box-sizing:border-box; }
+    html,body{ height:100%; }
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      background:
+        radial-gradient(1200px 600px at 10% 0%, rgba(110,231,255,.12), transparent 55%),
+        radial-gradient(900px 500px at 90% 10%, rgba(251,113,133,.10), transparent 60%),
+        var(--bg);
+      color:var(--text);
+    }
+
+    header{
+      position:sticky; top:0; z-index:5;
+      backdrop-filter: blur(10px);
+      background: linear-gradient(to bottom, rgba(11,16,32,.85), rgba(11,16,32,.35));
+      border-bottom: 1px solid var(--line);
+    }
+
+    .wrap{ max-width: 1100px; margin: 0 auto; padding: 18px 16px; }
+    .topbar{
+      display:flex; align-items:center; justify-content:space-between; gap: 12px;
+    }
+
+    .brand{
+      display:flex; align-items:center; gap: 12px;
+      min-width: 220px;
+    }
+    .logo{
+      width: 40px; height: 40px; border-radius: 12px;
+      background: linear-gradient(135deg, rgba(110,231,255,.9), rgba(110,231,255,.15));
+      box-shadow: 0 0 0 1px rgba(110,231,255,.25) inset, 0 12px 25px rgba(110,231,255,.10);
+    }
+    .titleblock{ line-height: 1.15; }
+    .titleblock .h{
+      font-weight: 800; font-size: 16px; letter-spacing: .2px;
+    }
+    .titleblock .s{
+      color: var(--muted); font-size: 12px;
+    }
+
+    .controls{ display:flex; flex-wrap:wrap; gap: 10px; align-items:center; justify-content:flex-end; }
+    .btn{
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.06);
+      color: var(--text);
+      padding: 10px 12px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-weight: 650;
+      transition: transform .05s ease, background .15s ease, border-color .15s ease;
+      user-select:none;
+    }
+    .btn:hover{ background: rgba(255,255,255,.09); border-color: rgba(255,255,255,.18); }
+    .btn:active{ transform: translateY(1px); }
+    .btn[disabled]{ opacity:.45; cursor:not-allowed; transform:none; }
+
+    .btn.primary{
+      background: linear-gradient(135deg, rgba(110,231,255,.25), rgba(110,231,255,.08));
+      border-color: rgba(110,231,255,.25);
+    }
+    .btn.danger{
+      background: linear-gradient(135deg, rgba(251,113,133,.22), rgba(251,113,133,.07));
+      border-color: rgba(251,113,133,.25);
+    }
+
+    .pill{
+      display:inline-flex; align-items:center; gap:8px;
+      padding: 9px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.05);
+      color: var(--muted);
+      font-weight: 650;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    .dot{ width: 9px; height: 9px; border-radius: 999px; background: var(--bad); box-shadow: 0 0 0 4px rgba(251,113,133,.12); }
+    .pill.ok .dot{ background: var(--good); box-shadow: 0 0 0 4px rgba(52,211,153,.12); }
+    .pill.warn .dot{ background: var(--warn); box-shadow: 0 0 0 4px rgba(251,191,36,.12); }
+
+    main .wrap{ padding-top: 16px; padding-bottom: 30px; }
+
+    .grid{
+      display:grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: 14px;
+    }
+    @media (max-width: 960px){
+      .grid{ grid-template-columns: 1fr; }
+      .controls{ justify-content:flex-start; }
+      .brand{ min-width: auto; }
+    }
+
+    .card{
+      background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow:hidden;
+    }
+    .card .hd{
+      padding: 14px 14px 10px 14px;
+      border-bottom: 1px solid var(--line);
+      display:flex; align-items:flex-start; justify-content:space-between; gap: 12px;
+    }
+    .card .hd .k{
+      font-weight: 800; letter-spacing: .2px;
+    }
+    .card .hd .m{
+      color: var(--muted); font-size: 12px; margin-top: 3px;
+    }
+    .card .bd{ padding: 14px; }
+
+    .live{
+      display:grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+
+    .big{
+      display:flex; align-items:baseline; justify-content:space-between; gap: 14px; flex-wrap: wrap;
+    }
+    .big .value{
+      font-size: 64px;
+      font-weight: 900;
+      letter-spacing: -1px;
+      line-height: 1;
+    }
+    .big .unit{
+      color: var(--muted);
+      font-weight: 750;
+      font-size: 18px;
+      margin-left: 8px;
+    }
+    .big .sub{
+      color: var(--muted);
+      font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      padding: 8px 10px;
+      background: rgba(255,255,255,.04);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      max-width: 100%;
+      overflow:hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .stats{
+      display:grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+    }
+    @media (max-width: 960px){ .stats{ grid-template-columns: repeat(2, 1fr); } }
+    .stat{
+      background: rgba(255,255,255,.04);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 10px 10px 9px 10px;
+    }
+    .stat .l{ color: var(--muted); font-size: 12px; }
+    .stat .v{ font-weight: 900; font-size: 18px; margin-top: 4px; }
+
+    .chartWrap{
+      background: rgba(255,255,255,.03);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 10px;
+    }
+    canvas{ width: 100%; height: 140px; display:block; }
+
+    .tableWrap{
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      overflow:hidden;
+      background: rgba(255,255,255,.03);
+    }
+    table{ width: 100%; border-collapse: collapse; }
+    thead th{
+      position: sticky; top: 0;
+      background: rgba(18,26,51,.9);
+      backdrop-filter: blur(6px);
+      border-bottom: 1px solid var(--line);
+      text-align:left;
+      font-size: 12px;
+      color: var(--muted);
+      padding: 10px 10px;
+      font-weight: 750;
+    }
+    tbody td{
+      border-bottom: 1px solid var(--line);
+      padding: 10px 10px;
+      font-size: 13px;
+      color: var(--text);
+      vertical-align: top;
+    }
+    tbody tr:hover{ background: rgba(255,255,255,.04); }
+    tbody td.mono{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--muted);
+      max-width: 420px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .hint{
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .hint code{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: rgba(255,255,255,.05);
+      border: 1px solid var(--line);
+      padding: 2px 6px;
+      border-radius: 8px;
+      color: var(--text);
+    }
+
+    .toast{
+      position: fixed;
+      bottom: 16px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(18,26,51,.92);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      color: var(--text);
+      padding: 10px 12px;
+      border-radius: 999px;
+      display:none;
+      gap:10px;
+      align-items:center;
+      font-size: 13px;
+      z-index: 50;
+      backdrop-filter: blur(10px);
+    }
+    .toast.show{ display:flex; }
   </style>
 </head>
 <body>
-  <h1>Photogate Speed (BLE)</h1>
+<header>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true"></div>
+        <div class="titleblock">
+          <div class="h">Photogate Speed Monitor</div>
+          <div class="s">BLE live readout • log • export</div>
+        </div>
+      </div>
 
-  <div class="row">
-    <button id="connect">Connect</button>
-    <button id="disconnect" disabled>Disconnect</button>
-    <button id="clear" disabled>Clear</button>
-    <button id="csv" disabled>Download CSV</button>
-    <span id="status" class="pill">Disconnected</span>
+      <div class="controls">
+        <button class="btn primary" id="connect">Connect</button>
+        <button class="btn danger" id="disconnect" disabled>Disconnect</button>
+        <button class="btn" id="clear" disabled>Clear</button>
+        <button class="btn" id="csv" disabled>Download CSV</button>
+        <span class="pill" id="status"><span class="dot"></span><span id="statusText">Disconnected</span></span>
+      </div>
+    </div>
   </div>
+</header>
 
-  <div id="latest">—</div>
-  <div id="units">m/s</div>
-  <div id="raw">Waiting for BLE notifications…</div>
+<main>
+  <div class="wrap">
+    <div class="grid">
 
-  <div id="hint" class="warn">
-    If the Connect button does nothing, open this page from a local server (not file://).<br>
-    Easiest: run <b>python -m http.server 8000</b> and open <b>http://localhost:8000/photogate_ble.html</b>
+      <!-- Live -->
+      <section class="card">
+        <div class="hd">
+          <div>
+            <div class="k">Live Speed</div>
+            <div class="m">Updates whenever the ESP32 sends a new notification</div>
+          </div>
+          <div class="pill warn" id="blePill" title="Connection + browser status">
+            <span class="dot"></span>
+            <span id="bleText">Chrome required</span>
+          </div>
+        </div>
+
+        <div class="bd live">
+          <div class="big">
+            <div>
+              <span class="value" id="latest">—</span>
+              <span class="unit">m/s</span>
+            </div>
+            <div class="sub" id="raw">Waiting for data…</div>
+          </div>
+
+          <div class="stats">
+            <div class="stat">
+              <div class="l">Trials</div>
+              <div class="v" id="trials">0</div>
+            </div>
+            <div class="stat">
+              <div class="l">Min</div>
+              <div class="v" id="min">—</div>
+            </div>
+            <div class="stat">
+              <div class="l">Max</div>
+              <div class="v" id="max">—</div>
+            </div>
+            <div class="stat">
+              <div class="l">Avg</div>
+              <div class="v" id="avg">—</div>
+            </div>
+          </div>
+
+          <div class="chartWrap">
+            <canvas id="chart" width="900" height="220" aria-label="Speed chart"></canvas>
+          </div>
+
+          <div class="hint" id="hint" style="display:none;">
+            Web Bluetooth doesn’t usually work from <code>file://</code>. Use your GitHub Pages link (recommended), or run a local server.
+          </div>
+        </div>
+      </section>
+
+      <!-- Log -->
+      <section class="card">
+        <div class="hd">
+          <div>
+            <div class="k">Trial Log</div>
+            <div class="m">Newest at top • Click Download CSV for export</div>
+          </div>
+          <div class="pill" title="UUIDs used by the webpage">
+            <span style="opacity:.8">UUIDs</span>
+          </div>
+        </div>
+
+        <div class="bd">
+          <div class="tableWrap" style="max-height: 460px; overflow:auto;">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:70px;">#</th>
+                  <th style="width:120px;">Time</th>
+                  <th style="width:140px;">Speed (m/s)</th>
+                  <th>Raw</th>
+                </tr>
+              </thead>
+              <tbody id="tbody"></tbody>
+            </table>
+          </div>
+
+          <div class="hint">
+            Tip: Students just open this page and click <b>Connect</b>. No installs.  
+            Device must advertise the service UUID and notify the characteristic UUID.
+          </div>
+        </div>
+      </section>
+
+    </div>
   </div>
+</main>
 
-  <h2>Log</h2>
-  <table>
-    <thead><tr><th>#</th><th>Time</th><th>Speed (m/s)</th><th>Raw</th></tr></thead>
-    <tbody id="tbody"></tbody>
-  </table>
+<div class="toast" id="toast"><span id="toastMsg"></span></div>
 
 <script>
   // MUST match your ESP32 UUIDs:
@@ -52,26 +387,69 @@
 
   let device = null;
   let characteristic = null;
+
   let rows = [];
   let n = 0;
+  let speeds = [];
 
   const $ = (id) => document.getElementById(id);
-  const statusEl = $("status");
+  const btnConnect = $("connect");
+  const btnDisconnect = $("disconnect");
+  const btnClear = $("clear");
+  const btnCSV = $("csv");
+
+  const statusPill = $("status");
+  const statusText = $("statusText");
+
+  const blePill = $("blePill");
+  const bleText = $("bleText");
+
   const latestEl = $("latest");
   const rawEl = $("raw");
   const tbody = $("tbody");
+
+  const trialsEl = $("trials");
+  const minEl = $("min");
+  const maxEl = $("max");
+  const avgEl = $("avg");
+
   const hint = $("hint");
 
-  function setStatus(text, ok=true) {
-    statusEl.textContent = text;
-    statusEl.style.background = ok ? "#e8f5e9" : "#ffebee";
+  const toast = $("toast");
+  const toastMsg = $("toastMsg");
+  let toastTimer = null;
+
+  function showToast(msg){
+    toastMsg.textContent = msg;
+    toast.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(()=>toast.classList.remove("show"), 2200);
   }
 
-  function nowString() {
-    return new Date().toLocaleTimeString();
+  function setStatus(text, ok){
+    statusText.textContent = text;
+    statusPill.classList.toggle("ok", !!ok);
+    statusPill.classList.toggle("warn", false);
+    // dot color handled by ok class (default is "bad-ish")
   }
 
-  function parseSpeed(text) {
+  function setBleBadge(text, state){
+    // state: "ok" | "warn" | "bad"
+    bleText.textContent = text;
+    blePill.classList.remove("ok","warn");
+    if (state === "ok") blePill.classList.add("ok");
+    else if (state === "warn") blePill.classList.add("warn");
+  }
+
+  function nowString(){
+    return new Date().toLocaleTimeString([], { hour: '2-digit', minute:'2-digit', second:'2-digit' });
+  }
+
+  function escapeHtml(s){
+    return s.replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
+  }
+
+  function parseSpeed(text){
     // Accept: "Speed: 1.234 m/s" OR "1.234" OR "v=1.234"
     const m = text.match(/([-+]?\d+(\.\d+)?)/);
     if (!m) return null;
@@ -79,37 +457,128 @@
     return Number.isFinite(v) ? v : null;
   }
 
-  function escapeHtml(s) {
-    return s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  function updateStats(){
+    trialsEl.textContent = String(speeds.length);
+    if (!speeds.length){
+      minEl.textContent = maxEl.textContent = avgEl.textContent = "—";
+      return;
+    }
+    let min = speeds[0], max = speeds[0], sum = 0;
+    for (const v of speeds){ if (v<min) min=v; if (v>max) max=v; sum+=v; }
+    const avg = sum / speeds.length;
+    minEl.textContent = min.toFixed(2);
+    maxEl.textContent = max.toFixed(2);
+    avgEl.textContent = avg.toFixed(2);
   }
 
-  function addRow(speed, raw) {
+  // Simple line chart (no external libs)
+  const canvas = $("chart");
+  const ctx = canvas.getContext("2d");
+
+  function drawChart(){
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0,0,w,h);
+
+    // background grid
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = "rgba(255,255,255,0.10)";
+    ctx.lineWidth = 1;
+
+    const pad = 18;
+    const left = pad, right = w - pad, top = pad, bottom = h - pad;
+
+    for (let i=0; i<=4; i++){
+      const y = top + (bottom-top) * (i/4);
+      ctx.beginPath();
+      ctx.moveTo(left, y);
+      ctx.lineTo(right, y);
+      ctx.stroke();
+    }
+
+    if (!speeds.length){
+      // placeholder text
+      ctx.fillStyle = "rgba(232,236,255,0.55)";
+      ctx.font = "700 14px ui-sans-serif, system-ui";
+      ctx.fillText("Waiting for speed data…", left, top + 22);
+      return;
+    }
+
+    const view = speeds.slice(-40); // last 40 points
+    let min = Math.min(...view), max = Math.max(...view);
+    if (min === max) { min -= 0.5; max += 0.5; } // avoid flatline
+
+    // labels
+    ctx.fillStyle = "rgba(232,236,255,0.65)";
+    ctx.font = "600 12px ui-sans-serif, system-ui";
+    ctx.fillText(`${max.toFixed(2)} m/s`, left, top - 3);
+    ctx.fillText(`${min.toFixed(2)} m/s`, left, bottom + 14);
+
+    // line
+    ctx.strokeStyle = "rgba(110,231,255,0.95)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+
+    for (let i=0; i<view.length; i++){
+      const x = left + (right-left) * (i/(view.length-1 || 1));
+      const t = (view[i] - min) / (max - min);
+      const y = bottom - (bottom-top) * t;
+      if (i===0) ctx.moveTo(x,y);
+      else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+
+    // last point dot
+    const last = view[view.length-1];
+    const xLast = right;
+    const tLast = (last - min) / (max - min);
+    const yLast = bottom - (bottom-top) * tLast;
+
+    ctx.fillStyle = "rgba(110,231,255,1)";
+    ctx.beginPath();
+    ctx.arc(xLast, yLast, 4, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  function addRow(speed, raw){
     n += 1;
     const time = nowString();
     rows.push({ n, time, speed, raw });
+    speeds.push(speed);
 
     latestEl.textContent = speed.toFixed(2);
     rawEl.textContent = `${time}  |  ${raw}`;
 
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${n}</td><td>${time}</td><td>${speed.toFixed(3)}</td><td class="mono">${escapeHtml(raw)}</td>`;
+    tr.innerHTML = `
+      <td>${n}</td>
+      <td>${time}</td>
+      <td><b>${speed.toFixed(3)}</b></td>
+      <td class="mono">${escapeHtml(raw)}</td>
+    `;
     tbody.prepend(tr);
+
+    updateStats();
+    drawChart();
   }
 
-  function clearLog() {
+  function clearLog(){
     rows = [];
+    speeds = [];
     n = 0;
     tbody.innerHTML = "";
     latestEl.textContent = "—";
-    rawEl.textContent = "Waiting for BLE notifications…";
+    rawEl.textContent = "Waiting for data…";
+    updateStats();
+    drawChart();
+    showToast("Cleared");
   }
 
-  function downloadCSV() {
+  function downloadCSV(){
     const header = "n,time,speed_mps,raw\n";
     const body = rows.slice().reverse().map(r =>
       `${r.n},${r.time},${r.speed},${JSON.stringify(r.raw)}`
     ).join("\n");
-    const blob = new Blob([header + body + "\n"], {type:"text/csv"});
+    const blob = new Blob([header + body + "\n"], { type:"text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -118,24 +587,33 @@
     URL.revokeObjectURL(url);
   }
 
-  function onDisconnected() {
-    setStatus("Disconnected", false);
-    $("disconnect").disabled = true;
-    $("clear").disabled = true;
-    $("csv").disabled = true;
-    device = null;
-    characteristic = null;
+  function uiConnected(yes){
+    btnDisconnect.disabled = !yes;
+    btnClear.disabled = !yes;
+    btnCSV.disabled = !yes;
+    btnConnect.disabled = yes;
   }
 
-  async function connect() {
+  function onDisconnected(){
+    setStatus("Disconnected", false);
+    setBleBadge("Disconnected", "bad");
+    uiConnected(false);
+    device = null;
+    characteristic = null;
+    showToast("Disconnected");
+  }
+
+  async function connect(){
     hint.style.display = (location.protocol === "file:") ? "block" : "none";
 
-    if (!navigator.bluetooth) {
-      alert("Web Bluetooth not supported. Use Chrome.");
+    if (!navigator.bluetooth){
+      setBleBadge("Web Bluetooth unsupported", "bad");
+      alert("Web Bluetooth not supported. Use Chrome or Edge.");
       return;
     }
 
-    setStatus("Connecting…");
+    setStatus("Connecting…", false);
+    setBleBadge("Requesting device…", "warn");
 
     device = await navigator.bluetooth.requestDevice({
       filters: [{ services: [SERVICE_UUID] }],
@@ -144,36 +622,48 @@
 
     device.addEventListener("gattserverdisconnected", onDisconnected);
 
+    setBleBadge("Connecting…", "warn");
     const server = await device.gatt.connect();
+
+    setBleBadge("Getting service…", "warn");
     const service = await server.getPrimaryService(SERVICE_UUID);
+
     characteristic = await service.getCharacteristic(CHAR_UUID);
 
     await characteristic.startNotifications();
+
     characteristic.addEventListener("characteristicvaluechanged", (e) => {
       const text = new TextDecoder().decode(e.target.value).trim();
       const speed = parseSpeed(text);
       if (speed !== null) addRow(speed, text);
     });
 
-    setStatus(`Connected: ${device.name || "BLE device"}`);
-    $("disconnect").disabled = false;
-    $("clear").disabled = false;
-    $("csv").disabled = false;
+    setStatus(`Connected`, true);
+    setBleBadge(`Connected: ${device.name || "BLE device"}`, "ok");
+    uiConnected(true);
+    showToast("Connected");
   }
 
-  function disconnect() {
+  function disconnect(){
     if (device?.gatt?.connected) device.gatt.disconnect();
     onDisconnected();
   }
 
-  $("connect").addEventListener("click", () => connect().catch(err => {
+  btnConnect.addEventListener("click", () => connect().catch(err => {
     console.error(err);
     setStatus("Connect failed", false);
+    setBleBadge("Connect failed", "bad");
     alert("Connect failed: " + err.message);
   }));
-  $("disconnect").addEventListener("click", disconnect);
-  $("clear").addEventListener("click", clearLog);
-  $("csv").addEventListener("click", downloadCSV);
+
+  btnDisconnect.addEventListener("click", disconnect);
+  btnClear.addEventListener("click", clearLog);
+  btnCSV.addEventListener("click", downloadCSV);
+
+  // initial
+  setStatus("Disconnected", false);
+  setBleBadge(navigator.bluetooth ? "Ready" : "Chrome required", navigator.bluetooth ? "warn" : "bad");
+  drawChart();
 </script>
 </body>
 </html>
